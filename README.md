@@ -1,61 +1,70 @@
 # DevRadar AI
 
-Job aggregation platform for developers. Crawls LinkedIn and returns active job listings via a REST API.
+CLI tool that crawls LinkedIn and prints developer job listings directly in the terminal.
 
 ## Tech Stack
 
 - Java 25
 - Spring Boot 4
-- Jsoup (web crawling)
-- SpringDoc OpenAPI (Swagger UI)
+- Playwright (Brave browser, headless)
 
-## Getting Started
+## Requirements
+
+- [Brave Browser](https://brave.com) installed at `/Applications/Brave Browser.app`
+
+## Run
 
 ```bash
 ./mvnw spring-boot:run
 ```
 
-API available at `http://localhost:8080`
-Swagger UI at `http://localhost:8080/swagger-ui/index.html`
+While crawling, a spinner is shown:
 
-## Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/v1/jobs` | Crawls LinkedIn and returns developer jobs (Brazil, last 7 days) |
-
-### Response example
-
-```json
-[
-  {
-    "title": "Desenvolvedor Java Sênior",
-    "company": "Acme Corp",
-    "location": "São Paulo, Brasil",
-    "remote": false,
-    "url": "https://www.linkedin.com/jobs/view/...",
-    "publishedAt": "2026-05-07"
-  }
-]
+```
+  Crawling LinkedIn... /
 ```
 
-## Project Structure
+When done, results are printed:
+
+```
+=== DevRadar AI — 24 jobs found ===
+
+[2026-05-07] Desenvolvedor Java Sênior @ Acme Corp
+  Workplace : Remoto
+  Type      : Tempo integral
+  Seniority : Pleno-sênior
+  Location  : Brasil
+  URL       : https://www.linkedin.com/jobs/view/...
+
+[2026-05-08] Engenheiro de Software @ Betha Sistemas
+  Workplace : Híbrido
+  Type      : Tempo integral
+  Seniority : Júnior
+  Location  : Blumenau, Santa Catarina, Brasil
+  URL       : https://www.linkedin.com/jobs/view/...
+```
+
+## Search criteria (hardcoded)
+
+| Parameter | Value |
+|-----------|-------|
+| Keywords  | `desenvolvedor` |
+| Location  | Brazil (`geoId=106057199`) |
+| Period    | Last 7 days |
+
+## Project structure
 
 ```
 src/main/java/albertodumontt/devRadarAI/
+├── DevRadarAiApplication.java   # CommandLineRunner — spinner + output
 ├── model/
-│   └── JobResponse.java          # API response record
-├── infrastructure/
-│   ├── config/
-│   │   ├── SecurityConfig.java   # Spring Security (stateless, public API)
-│   │   └── OpenApiConfig.java    # Swagger configuration
-│   └── crawler/
-│       └── LinkedinWorker.java   # Jsoup-based LinkedIn crawler
-└── infrastructure/controller/
-    └── JobController.java        # GET /api/v1/jobs
+│   └── JobResponse.java         # record: title, company, location, workplaceType, employmentType, seniorityLevel, remote, url, publishedAt
+└── infrastructure/
+    └── crawler/
+        └── LinkedinWorker.java  # Playwright crawler — search list + detail pages
 ```
 
 ## Notes
 
-- LinkedIn detail pages return HTTP 429 for unauthenticated scrapers, so job descriptions are not available via scraping.
-- For production use, consider the official LinkedIn Jobs API or an authenticated browser session (Selenium/Playwright).
+- LinkedIn blocks unauthenticated HTTP requests (HTTP 429). Playwright with a real browser avoids this.
+- Job descriptions are not available — LinkedIn detail pages require an authenticated session to render the full content.
