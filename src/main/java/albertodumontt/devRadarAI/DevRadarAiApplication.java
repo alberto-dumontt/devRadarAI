@@ -2,7 +2,9 @@ package albertodumontt.devRadarAI;
 
 import albertodumontt.devRadarAI.cli.CliProgress;
 import albertodumontt.devRadarAI.infrastructure.crawler.LinkedinWorker;
+import albertodumontt.devRadarAI.infrastructure.supabase.SupabaseJobService;
 import albertodumontt.devRadarAI.model.JobResponse;
+import io.github.cdimascio.dotenv.Dotenv;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.boot.SpringApplication;
@@ -15,9 +17,12 @@ import java.util.List;
 public class DevRadarAiApplication implements CommandLineRunner {
 
 	private final LinkedinWorker linkedinWorker;
+	private final SupabaseJobService supabaseJobService;
 	private final CliProgress progress;
 
 	public static void main(String[] args) {
+		Dotenv.configure().ignoreIfMissing().load().entries()
+				.forEach(e -> System.setProperty(e.getKey(), e.getValue()));
 		SpringApplication.run(DevRadarAiApplication.class, args);
 	}
 
@@ -27,9 +32,18 @@ public class DevRadarAiApplication implements CommandLineRunner {
 
 		List<JobResponse> jobs = linkedinWorker.crawl();
 
+		if (jobs.isEmpty()) {
+			progress.stop();
+			System.out.println("No jobs found — database unchanged.");
+			return;
+		}
+
+		progress.update("Saving to database...");
+		int saved = supabaseJobService.replaceAll(jobs);
+
 		progress.stop();
 
-		System.out.println("=== DevRadar AI — " + jobs.size() + " jobs found ===\n");
+		System.out.println("=== DevRadar AI — " + jobs.size() + " jobs found, " + saved + " persisted ===\n");
 
 		jobs.forEach(job -> {
 			String separator = "─".repeat(60);
