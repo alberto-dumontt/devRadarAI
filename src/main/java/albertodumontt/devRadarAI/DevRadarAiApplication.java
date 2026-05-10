@@ -44,11 +44,7 @@ public class DevRadarAiApplication implements CommandLineRunner {
 			System.out.println("  URL        : " + job.url());
 			System.out.println();
 			System.out.println("  Description:");
-			if (job.description() != null) {
-				job.description().lines().forEach(line -> System.out.println("    " + line));
-			} else {
-				System.out.println("    -");
-			}
+			job.description().lines().forEach(line -> System.out.println("    " + line));
 			System.out.println();
 		});
 	}

@@ -2,6 +2,7 @@ package albertodumontt.devRadarAI.infrastructure.crawler;
 
 import albertodumontt.devRadarAI.cli.CliProgress;
 import albertodumontt.devRadarAI.model.JobResponse;
+import albertodumontt.devRadarAI.model.WorkplaceType;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.WaitUntilState;
 import lombok.RequiredArgsConstructor;
@@ -92,9 +93,9 @@ public class LinkedinWorker {
             if (title.isBlank() || url.isBlank()) return null;
 
             LocalDate publishedAt = (datetime != null && !datetime.isBlank())
-                    ? LocalDate.parse(datetime) : null;
+                    ? LocalDate.parse(datetime) : LocalDate.now();
 
-            return new JobResponse(title, company, location, null, null, null, false, null, url, publishedAt);
+            return new JobResponse(title, company, location, WorkplaceType.NOT_DEFINED, "NOT_DEFINED", "NOT_DEFINED", "NOT_DEFINED", url, publishedAt);
 
         } catch (Exception ignored) {
             return null;
@@ -108,33 +109,36 @@ public class LinkedinWorker {
 
             String workplaceType = Stream.of(
                     "span.job-details-jobs-unified-top-card__workplace-type",
-                    "span[class*='workplace-type']",
-                    "li.job-details-jobs-unified-top-card__job-insight span"
+                    "span[class*='workplace-type']"
             )
             .map(page::querySelector)
             .filter(Objects::nonNull)
             .map(el -> el.innerText().trim())
             .filter(t -> !t.isBlank())
             .findFirst()
-            .orElse(null);
+            .orElseGet(() ->
+                page.querySelectorAll("li.job-details-jobs-unified-top-card__job-insight span").stream()
+                    .map(el -> el.innerText().trim())
+                    .filter(t -> !t.isBlank())
+                    .filter(t -> WorkplaceType.from(t) != WorkplaceType.NOT_DEFINED)
+                    .findFirst()
+                    .orElse(null)
+            );
 
             Map<String, String> criteria = parseCriteria(page);
             String seniorityLevel = criteria.getOrDefault("seniority level",
-                                    criteria.get("nível de experiência"));
+                                    criteria.getOrDefault("nível de experiência", "NOT_DEFINED"));
+            if ("Não aplicável".equalsIgnoreCase(seniorityLevel)) seniorityLevel = "NOT_DEFINED";
             String employmentType = criteria.getOrDefault("employment type",
-                                    criteria.get("tipo de emprego"));
+                                    criteria.getOrDefault("tipo de emprego", "NOT_DEFINED"));
 
-            if (workplaceType == null) workplaceType = "notDefined";
-
-            boolean remote = workplaceType.toLowerCase().contains("remote") ||
-                             workplaceType.toLowerCase().contains("remoto");
-
+            WorkplaceType workplace = WorkplaceType.from(workplaceType);
             String description = parseDescription(page);
 
             return new JobResponse(
                     job.title(), job.company(), job.location(),
-                    workplaceType, employmentType, seniorityLevel,
-                    remote, description, job.url(), job.publishedAt()
+                    workplace, employmentType, seniorityLevel,
+                    description, job.url(), job.publishedAt()
             );
 
         } catch (Exception ignored) {
@@ -158,7 +162,7 @@ public class LinkedinWorker {
                     .collect(java.util.stream.Collectors.joining("\n"));
             if (!text.isBlank()) return text;
         }
-        return null;
+        return "NOT_DEFINED";
     }
 
     private Map<String, String> parseCriteria(Page page) {

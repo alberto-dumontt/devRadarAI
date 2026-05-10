@@ -6,10 +6,9 @@ public record JobResponse(
         String title,
         String company,
         String location,
-        String workplaceType,
+        WorkplaceType workplaceType,
         String employmentType,
         String seniorityLevel,
-        boolean remote,
         String description,
         String url,
         LocalDate publishedAt
