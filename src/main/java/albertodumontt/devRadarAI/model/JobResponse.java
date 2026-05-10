@@ -10,6 +10,7 @@ public record JobResponse(
         String employmentType,
         String seniorityLevel,
         boolean remote,
+        String description,
         String url,
         LocalDate publishedAt
 ) {}

@@ -1,5 +1,6 @@
 package albertodumontt.devRadarAI;
 
+import albertodumontt.devRadarAI.cli.CliProgress;
 import albertodumontt.devRadarAI.infrastructure.crawler.LinkedinWorker;
 import albertodumontt.devRadarAI.model.JobResponse;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +15,7 @@ import java.util.List;
 public class DevRadarAiApplication implements CommandLineRunner {
 
 	private final LinkedinWorker linkedinWorker;
+	private final CliProgress progress;
 
 	public static void main(String[] args) {
 		SpringApplication.run(DevRadarAiApplication.class, args);
@@ -21,45 +23,33 @@ public class DevRadarAiApplication implements CommandLineRunner {
 
 	@Override
 	public void run(String... args) {
-		Thread spinner = buildSpinner();
-		spinner.start();
+		progress.start("Starting up...");
 
 		List<JobResponse> jobs = linkedinWorker.crawl();
 
-		spinner.interrupt();
-		System.out.print("\r" + " ".repeat(50) + "\r");
+		progress.stop();
 
 		System.out.println("=== DevRadar AI — " + jobs.size() + " jobs found ===\n");
 
-		jobs.forEach(job -> System.out.printf(
-				"[%s] %s @ %s%n  Workplace : %s%n  Type      : %s%n  Seniority : %s%n  Location  : %s%n  URL       : %s%n%n",
-				job.publishedAt(),
-				job.title(),
-				job.company(),
-				job.workplaceType(),
-				job.employmentType(),
-				job.seniorityLevel(),
-				job.location(),
-				job.url()
-		));
-	}
-
-	private Thread buildSpinner() {
-		String[] frames = {"|", "/", "-", "\\"};
-		Thread thread = new Thread(() -> {
-			int i = 0;
-			while (!Thread.currentThread().isInterrupted()) {
-				System.out.print("\r  Crawling LinkedIn... " + frames[i % frames.length]);
-				System.out.flush();
-				i++;
-				try {
-					Thread.sleep(120);
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
-				}
+		jobs.forEach(job -> {
+			String separator = "─".repeat(60);
+			System.out.println(separator);
+			System.out.println("  " + job.title());
+			System.out.println("  " + job.company() + " • " + job.location());
+			System.out.println();
+			System.out.println("  Workplace  : " + job.workplaceType());
+			System.out.println("  Type       : " + job.employmentType());
+			System.out.println("  Seniority  : " + job.seniorityLevel());
+			System.out.println("  Published  : " + job.publishedAt());
+			System.out.println("  URL        : " + job.url());
+			System.out.println();
+			System.out.println("  Description:");
+			if (job.description() != null) {
+				job.description().lines().forEach(line -> System.out.println("    " + line));
+			} else {
+				System.out.println("    -");
 			}
+			System.out.println();
 		});
-		thread.setDaemon(true);
-		return thread;
 	}
 }

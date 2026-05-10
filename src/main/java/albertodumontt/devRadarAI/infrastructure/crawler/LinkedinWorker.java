@@ -1,9 +1,10 @@
 package albertodumontt.devRadarAI.infrastructure.crawler;
 
+import albertodumontt.devRadarAI.cli.CliProgress;
 import albertodumontt.devRadarAI.model.JobResponse;
 import com.microsoft.playwright.*;
 import com.microsoft.playwright.options.WaitUntilState;
-import lombok.extern.slf4j.Slf4j;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.nio.file.Path;
@@ -12,9 +13,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Stream;
+import java.util.concurrent.atomic.AtomicInteger;
 
-@Slf4j
 @Component
+@RequiredArgsConstructor
 public class LinkedinWorker {
 
     // geoId=106057199 = Brazil | f_TPR=r604800 = last 7 days
@@ -24,8 +27,9 @@ public class LinkedinWorker {
     private static final String BRAVE_PATH =
             "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser";
 
+    private final CliProgress progress;
+
     public List<JobResponse> crawl() {
-        log.info("LinkedinWorker: starting crawl");
         try (Playwright playwright = Playwright.create(new Playwright.CreateOptions()
                 .setEnv(Map.of("PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD", "1")))) {
 
@@ -43,27 +47,30 @@ public class LinkedinWorker {
 
             Page page = context.newPage();
 
-            // Step 1: collect basic data from search results
+            progress.update("Connecting to LinkedIn...");
             page.navigate(SEARCH_URL, new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
+
+            progress.update("Waiting for job listings...");
             page.waitForSelector("ul.jobs-search__results-list", new Page.WaitForSelectorOptions().setTimeout(15_000));
 
+            progress.update("Parsing job cards...");
             List<JobResponse> jobs = page.querySelectorAll("ul.jobs-search__results-list > li").stream()
                     .map(this::parseCard)
                     .filter(Objects::nonNull)
                     .toList();
 
-            log.info("LinkedinWorker: {} jobs found, fetching details...", jobs.size());
+            int total = jobs.size();
+            AtomicInteger counter = new AtomicInteger(1);
 
-            // Step 2: enrich each job with detail page data
-            List<JobResponse> result = jobs.stream()
-                    .map(job -> withDetails(page, job))
+            return jobs.stream()
+                    .map(job -> {
+                        progress.update("Fetching details (" + counter.getAndIncrement() + "/" + total + "): " + job.title());
+                        return withDetails(page, job);
+                    })
                     .toList();
 
-            log.info("LinkedinWorker: crawl complete");
-            return result;
-
         } catch (Exception e) {
-            log.error("LinkedinWorker: crawl failed — {}", e.getMessage());
+            progress.update("Crawl failed: " + e.getMessage());
             return List.of();
         }
     }
@@ -87,10 +94,9 @@ public class LinkedinWorker {
             LocalDate publishedAt = (datetime != null && !datetime.isBlank())
                     ? LocalDate.parse(datetime) : null;
 
-            return new JobResponse(title, company, location, null, null, null, false, url, publishedAt);
+            return new JobResponse(title, company, location, null, null, null, false, null, url, publishedAt);
 
-        } catch (Exception e) {
-            log.warn("LinkedinWorker: failed to parse card — {}", e.getMessage());
+        } catch (Exception ignored) {
             return null;
         }
     }
@@ -100,36 +106,59 @@ public class LinkedinWorker {
             page.navigate(job.url(), new Page.NavigateOptions().setWaitUntil(WaitUntilState.DOMCONTENTLOADED));
             page.waitForTimeout(2_000);
 
-            // Workplace type: Remote / Hybrid / On-site
-            ElementHandle workplaceEl = page.querySelector(
-                    "span.job-details-jobs-unified-top-card__workplace-type"
-            );
-            String workplaceType = workplaceEl != null ? workplaceEl.innerText().trim() : null;
+            String workplaceType = Stream.of(
+                    "span.job-details-jobs-unified-top-card__workplace-type",
+                    "span[class*='workplace-type']",
+                    "li.job-details-jobs-unified-top-card__job-insight span"
+            )
+            .map(page::querySelector)
+            .filter(Objects::nonNull)
+            .map(el -> el.innerText().trim())
+            .filter(t -> !t.isBlank())
+            .findFirst()
+            .orElse(null);
 
-            // Criteria list: seniority level, employment type, etc.
             Map<String, String> criteria = parseCriteria(page);
-            String seniorityLevel  = criteria.get("seniority level");
-            String employmentType  = criteria.get("employment type");
+            String seniorityLevel = criteria.getOrDefault("seniority level",
+                                    criteria.get("nível de experiência"));
+            String employmentType = criteria.getOrDefault("employment type",
+                                    criteria.get("tipo de emprego"));
 
-            // Fallback pt-BR keys
-            if (seniorityLevel == null)  seniorityLevel  = criteria.get("nível de experiência");
-            if (employmentType == null)  employmentType  = criteria.get("tipo de emprego");
+            if (workplaceType == null) workplaceType = "notDefined";
 
-            boolean remote = workplaceType != null &&
-                    (workplaceType.toLowerCase().contains("remote") ||
-                     workplaceType.toLowerCase().contains("remoto"));
+            boolean remote = workplaceType.toLowerCase().contains("remote") ||
+                             workplaceType.toLowerCase().contains("remoto");
 
-            log.debug("LinkedinWorker: details fetched for '{}'", job.title());
+            String description = parseDescription(page);
+
             return new JobResponse(
                     job.title(), job.company(), job.location(),
                     workplaceType, employmentType, seniorityLevel,
-                    remote, job.url(), job.publishedAt()
+                    remote, description, job.url(), job.publishedAt()
             );
 
-        } catch (Exception e) {
-            log.warn("LinkedinWorker: failed to fetch details for '{}' — {}", job.title(), e.getMessage());
+        } catch (Exception ignored) {
             return job;
         }
+    }
+
+    private String parseDescription(Page page) {
+        String[] selectors = {
+            "div.show-more-less-html__markup",
+            "div.description__text",
+            "section.show-more-less-html"
+        };
+        for (String selector : selectors) {
+            ElementHandle el = page.querySelector(selector);
+            if (el == null) continue;
+            String text = el.innerText().lines()
+                    .map(String::trim)
+                    .filter(line -> !line.isBlank())
+                    .filter(line -> !line.equalsIgnoreCase("Sobre a vaga") && !line.equalsIgnoreCase("description"))
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            if (!text.isBlank()) return text;
+        }
+        return null;
     }
 
     private Map<String, String> parseCriteria(Page page) {
